@@ -66,7 +66,7 @@ We hasv tested our code before uploading. The log files can be found in MiN/log.
 **If you use any content of this repo for your work, please cite the following bib entries:**
 
     @inproceedings{MiN,
-      title={Min: Mixture of Noise for Pre-Trained Model-Based Class-Incremental Learning}, 
+      title={Mixture of Noise for Pre-Trained Model-Based Class-Incremental Learning}, 
       author={Kai Jiang and Zhengyan Shi and Dell Zhang and Hongyuan Zhang and Xuelong Li},
       booktitle={The Thirty-Ninth Annual Conference on Neural Information Processing Systems (NeurIPS)},
       year={2025},
