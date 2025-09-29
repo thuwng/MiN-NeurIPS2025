@@ -19,6 +19,7 @@ Six datasets are included in our experiments, i.e., CIFAR-100, CUB-200, ImageNet
 4. **CUB-200**: AWS: [link](https://s3.amazonaws.com/fast-ai-imageclas/CUB_200_2011.tgz)
 5. **FOOD-101**: AWS: [link](https://s3.amazonaws.com/fast-ai-imageclas/food-101.tgz)
 6. **ImageNet-R**: official: [link](https://people.eecs.berkeley.edu/~hendrycks/imagenet-r.tar)
+
 Then, revise the data path in data_process/data.py.
 
 ## Install
