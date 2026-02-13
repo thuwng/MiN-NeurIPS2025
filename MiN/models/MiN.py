@@ -211,6 +211,7 @@ class MinNet(object):
     def fit_fc(self, train_loader, test_loader):
         self._network.eval()
         self._network.to(self.device)
+        self._network.backbone.eval()
 
         prog_bar = tqdm(range(self.fit_epoch))
         for _, epoch in enumerate(prog_bar):
@@ -411,15 +412,32 @@ class MinNet(object):
         }
 
     def get_task_prototype(self, model, train_loader):
+
         model = model.eval()
         model.to(self.device)
-        features = []
-        for i, (_, inputs, targets) in enumerate(train_loader):
-            inputs, targets = inputs.to(self.device), targets.to(self.device)
+
+        proto_sum = None
+        count = 0
+
+        for _, inputs, targets in train_loader:
+            inputs = inputs.to(self.device)
+
             with torch.no_grad():
                 feature = model.extract_feature(inputs)
-            features.append(feature)
-        prototype = torch.mean(torch.concat(features, dim=0), dim=0)
+
+            batch_mean = feature.mean(dim=0)
+
+            if proto_sum is None:
+                proto_sum = batch_mean
+            else:
+                proto_sum += batch_mean
+
+            count += 1
+
+            del feature
+            torch.cuda.empty_cache()
+
+        prototype = proto_sum / count
         return prototype
             
     def pass_fisher_to_backbone(self, fisher_vec):

@@ -113,30 +113,33 @@ def compute_fisher(model, dataloader):
         else:
             images, labels = batch
 
-        images = images.to(device)
-        labels = labels.to(device)
+        images = images.to(device, non_blocking=True)
+        labels = labels.to(device, non_blocking=True)
 
-        # --- extract features ---
+        # 🔥 VERY IMPORTANT: disable noise & grad for backbone
         with torch.no_grad():
             features = model.backbone(images)
 
-        features = features.detach()
-        features.requires_grad_(True)
+        features = features.detach().requires_grad_(True)
 
         logits = model.normal_fc(model.buffer(features))["logits"]
         loss = F.cross_entropy(logits, labels)
 
-        model.zero_grad()
+        model.normal_fc.zero_grad(set_to_none=True)
         loss.backward()
 
-        fisher = features.grad.detach() ** 2
+        fisher = features.grad.detach().pow(2).mean(dim=0)
 
         if fisher_sum is None:
-            fisher_sum = fisher.mean(dim=0)
+            fisher_sum = fisher
         else:
-            fisher_sum += fisher.mean(dim=0)
+            fisher_sum += fisher
 
         count += 1
+
+        # 🔥 free memory immediately
+        del features, logits, loss
+        torch.cuda.empty_cache()
 
     fisher_vec = fisher_sum / count
     fisher_vec = fisher_vec / (fisher_vec.norm() + 1e-8)
