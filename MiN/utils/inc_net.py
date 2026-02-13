@@ -82,7 +82,7 @@ class MiNbaseNet(nn.Module):
 
         self.buffer = RandomBuffer(in_features=self.feature_dim, buffer_size=self.buffer_size, device=self.device)
 
-        factory_kwargs = {"device": device, "dtype": torch.float32}
+        factory_kwargs = {"device": self.device, "dtype": torch.float32}
 
         weight = torch.zeros((self.buffer_size, 0), **factory_kwargs)
         self.register_buffer("weight", weight)
