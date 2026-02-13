@@ -124,7 +124,7 @@ class MinNet(object):
         self._network.extend_task_prototype(prototype)
         self.run(train_loader)
         fisher = compute_fisher(self._network, train_loader)
-        self.pass_fisher_to_backbone(fisher, train_loader)
+        self.pass_fisher_to_backbone(fisher)
         prototype = self.get_task_prototype(self._network, train_loader)
         self._network.update_task_prototype(prototype)
         train_loader = DataLoader(train_set, batch_size=self.buffer_batch, shuffle=True,
@@ -183,7 +183,7 @@ class MinNet(object):
         self._network.extend_task_prototype(prototype)
         self.run(train_loader)
         fisher = compute_fisher(self._network, train_loader)
-        self.pass_fisher_to_backbone(fisher, train_loader)
+        self.pass_fisher_to_backbone(fisher)
         prototype = self.get_task_prototype(self._network, train_loader)
         self._network.update_task_prototype(prototype)
 
