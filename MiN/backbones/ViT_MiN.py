@@ -61,11 +61,6 @@ class Noise_weigh(nn.Module):
         return x * self.weight
 
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-
 class PiNoise(nn.Module):
     def __init__(self, in_dim, out_dim, hidden_dim=384):
         super().__init__()
@@ -248,12 +243,17 @@ class PiNoise(nn.Module):
         # normalize to avoid explosion
         fisher = fisher / (fisher.mean() + 1e-8)
 
-        mask = torch.exp(-fisher)
-
+        mask = torch.exp(-fisher).detach()
         return mask.view(1, -1)
 
 
-
+def forward_features(self, x, use_noise=True):
+    for i in range(self.layer_num):
+        if use_noise:
+            x = self.noise_maker[i](self.blocks[i](x))
+        else:
+            x = self.blocks[i](x)
+    return x
 
 class Attention(nn.Module):
     fused_attn: Final[bool]

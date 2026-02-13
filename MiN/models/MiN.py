@@ -95,35 +95,6 @@ class MinNet(object):
         for i in range(len(targets)):
             targets[i] = datamanger.map_cat2order(targets[i])
         return targets
-    
-    def compute_fisher_safe(self, dataloader):
-
-        net = self._network
-        net.eval()
-
-        # 1️⃣ Freeze tất cả
-        for p in net.parameters():
-            p.requires_grad_(False)
-
-        # 2️⃣ Enable noise + normal_fc
-        if hasattr(net.backbone, "noise_maker"):
-            for p in net.backbone.noise_maker.parameters():
-                p.requires_grad_(True)
-
-        for p in net.normal_fc.parameters():
-            p.requires_grad_(True)
-
-        # 3️⃣ Compute fisher
-        fisher = compute_fisher(net, dataloader)
-
-        # 4️⃣ Restore toàn bộ
-        for p in net.parameters():
-            p.requires_grad_(True)
-
-        net.train()
-        torch.cuda.empty_cache()
-
-        return fisher
 
     def init_train(self, data_manger):
         self.cur_task += 1
@@ -272,6 +243,7 @@ class MinNet(object):
             prog_bar.set_description(info)
 
     def run(self, train_loader):
+
         if self.cur_task == 0:
             epochs = self.init_epochs
             lr = self.init_lr
@@ -281,64 +253,109 @@ class MinNet(object):
             lr = self.lr
             weight_decay = self.weight_decay
 
+        # ---- Freeze all ----
         for param in self._network.parameters():
             param.requires_grad = False
+
+        # ---- Enable classifier ----
         for param in self._network.normal_fc.parameters():
             param.requires_grad = True
-            
+
+        # ---- Enable noise ----
         if self.cur_task == 0:
             self._network.init_unfreeze()
         else:
             self._network.unfreeze_noise()
-            
-        params = filter(lambda p: p.requires_grad, self._network.parameters())
-        optimizer = get_optimizer(self.args['optimizer_type'], params, lr, weight_decay)
-        scheduler = get_scheduler(self.args['scheduler_type'], optimizer, epochs)
 
+        params = filter(lambda p: p.requires_grad, self._network.parameters())
+        optimizer = get_optimizer(
+            self.args['optimizer_type'], params, lr, weight_decay
+        )
+        scheduler = get_scheduler(
+            self.args['scheduler_type'], optimizer, epochs
+        )
+
+        # 🔴 VERY IMPORTANT
         prog_bar = tqdm(range(epochs))
         self._network.train()
+        self._network.backbone.eval()
         self._network.to(self.device)
+
         for _, epoch in enumerate(prog_bar):
             losses = 0.0
             correct, total = 0, 0
 
-            for i, (_, inputs, targets) in enumerate(train_loader):
-                inputs, targets = inputs.to(self.device), targets.to(self.device)
+            for _, (_, inputs, targets) in enumerate(train_loader):
+
+                inputs = inputs.to(self.device)
+                targets = targets.to(self.device)
+
+                # ===== Forward =====
                 if self.cur_task > 0:
                     with torch.no_grad():
-                        outputs1 = self._network(inputs, new_forward=False)
-                        logits1 = outputs1['logits']
-                    outputs2 = self._network.forward_normal_fc(inputs, new_forward=False)
-                    logits2 = outputs2['logits']
-                    logits2 = logits2 + logits1
-                    loss = F.cross_entropy(logits2, targets.long())
-                else:
-                    outputs = self._network.forward_normal_fc(inputs, new_forward=False)
-                    logits = outputs["logits"]
-                    loss = F.cross_entropy(logits, targets.long())
+                        old_out = self._network(inputs, new_forward=False)
+                        old_logits = old_out['logits']
 
+                    new_out = self._network.forward_normal_fc(
+                        inputs, new_forward=False
+                    )
+                    new_logits = new_out['logits']
+
+                    logits = new_logits + old_logits
+                else:
+                    out = self._network.forward_normal_fc(
+                        inputs, new_forward=False
+                    )
+                    logits = out['logits']
+
+                # ===== CE Loss =====
+                loss = F.cross_entropy(logits, targets.long())
+
+                # ===== Fisher-guided noise regularization =====
+                fisher_loss = 0.0
+                noise_maker = self._network.backbone.noise_maker
+
+                if hasattr(noise_maker[0], "fisher_importance"):
+                    fisher_vec = noise_maker[0].fisher_importance
+
+                    if fisher_vec is not None:
+
+                        fisher_flat = fisher_vec.view(-1)
+
+                        for noise_layer in noise_maker:
+                            for mu_layer in noise_layer.mu:
+
+                                noise_weight = mu_layer.weight.view(-1)
+                                
+                                min_len = min(noise_weight.numel(), fisher_flat.numel())
+
+                                fisher_loss += (
+                                    noise_weight[:min_len].pow(2) * fisher_flat[:min_len]
+                                ).mean()
+
+                        loss = loss + 0.1 * fisher_loss
+
+                # ===== Backward =====
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
+
                 losses += loss.item()
 
-                if self.cur_task > 0:
-                    _, preds = torch.max(logits2, dim=1)
-                else:
-                    _, preds = torch.max(logits, dim=1)
-                correct += preds.eq(targets.expand_as(preds)).cpu().sum()
-                total += len(targets)
+                _, preds = torch.max(logits, dim=1)
+                correct += preds.eq(targets).cpu().sum()
+                total += targets.size(0)
 
             scheduler.step()
             train_acc = 100. * correct / total
 
-            info = "Task {} --> Learning Beneficial Noise!: Epoch {}/{} => Loss {:.3f}, train_accy {:.2f}".format(
-                self.cur_task,
-                epoch + 1,
-                epochs,
-                losses / len(train_loader),
-                train_acc,
+            info = (
+                f"Task {self.cur_task} --> Learning Beneficial Noise!: "
+                f"Epoch {epoch + 1}/{epochs} "
+                f"=> Loss {losses / len(train_loader):.3f}, "
+                f"train_accy {train_acc:.2f}"
             )
+
             self.logger.info(info)
             prog_bar.set_description(info)
 
@@ -376,18 +393,11 @@ class MinNet(object):
         prototype = torch.mean(torch.concat(features, dim=0), dim=0)
         return prototype
             
-    def pass_fisher_to_backbone(self, fisher_dict):
+    def pass_fisher_to_backbone(self, fisher_vec):
+
         backbone = self._network.backbone
-        importance = torch.zeros(backbone.embed_dim).to(self.device)
 
-        for name, param in backbone.named_parameters():
-            if name in fisher_dict:
-                fisher_val = fisher_dict[name]
-
-                if param.dim() == 2:
-                    importance += fisher_val.mean(dim=0)
-
-        importance = importance / (importance.norm() + 1e-8)
 
         for noise_layer in backbone.noise_maker:
-            noise_layer.set_fisher(importance)
+            noise_layer.set_fisher(fisher_vec)
+

@@ -57,11 +57,6 @@ def _train(args):
     model.init_train(data_manger=datamanger)
     model.after_train(data_manger=datamanger)
 
-    loader = datamanger.get_train_loader()   
-    fisher = compute_fisher(model, loader)
-    model.fisher_list.append(fisher)
-    model.pass_fisher_to_backbone(fisher)
-
     save_path = os.path.join(workdir, 'task_0_check_point.pth')
     if args["save_all_checkpoint"] is True:
         model.save_check_point(save_path)
@@ -70,11 +65,6 @@ def _train(args):
         save_path = os.path.join(workdir, 'task_{}_check_point.pth'.format(i+1))
         model.increment_train(data_manger=datamanger)
         model.after_train(data_manger=datamanger)
-
-        loader = datamanger.get_train_loader()
-        fisher = compute_fisher(model, loader)
-        model.fisher_list.append(fisher)
-        model.pass_fisher_to_backbone(fisher)
 
         if args["save_all_checkpoint"] is True:
             model.save_check_point(save_path)
@@ -113,15 +103,8 @@ def compute_fisher(model, dataloader):
     device = next(model.parameters()).device
     model.eval()
 
-    params = [(n, p) for n, p in model.named_parameters() if p.requires_grad]
-
-    if len(params) == 0:
-        raise RuntimeError("No parameters require grad for Fisher")
-
-    fisher = {
-        name: torch.zeros_like(p, device="cpu")
-        for name, p in params
-    }
+    fisher_sum = None
+    count = 0
 
     for batch in dataloader:
 
@@ -130,31 +113,33 @@ def compute_fisher(model, dataloader):
         else:
             images, labels = batch
 
-        images = images.to(device, non_blocking=True)
-        labels = labels.to(device, non_blocking=True)
+        images = images.to(device)
+        labels = labels.to(device)
 
-        outputs = model.forward_normal_fc(images, new_forward=False)
-        logits = outputs["logits"]
+        # --- extract features ---
+        with torch.no_grad():
+            features = model.backbone(images)
 
+        features = features.detach()
+        features.requires_grad_(True)
+
+        logits = model.normal_fc(model.buffer(features))["logits"]
         loss = F.cross_entropy(logits, labels)
 
-        grads = torch.autograd.grad(
-            loss,
-            [p for _, p in params],
-            retain_graph=False,
-            create_graph=False,
-            allow_unused=True
-        )
+        model.zero_grad()
+        loss.backward()
 
-        for (name, _), g in zip(params, grads):
-            if g is not None:
-                fisher[name] += (g.detach().cpu() ** 2)
+        fisher = features.grad.detach() ** 2
 
-        del images, labels, outputs, logits, loss, grads
-        torch.cuda.empty_cache()
+        if fisher_sum is None:
+            fisher_sum = fisher.mean(dim=0)
+        else:
+            fisher_sum += fisher.mean(dim=0)
 
-    for name in fisher:
-        fisher[name] /= len(dataloader)
+        count += 1
 
-    torch.cuda.empty_cache()
-    return fisher
+    fisher_vec = fisher_sum / count
+    fisher_vec = fisher_vec / (fisher_vec.norm() + 1e-8)
+
+    return fisher_vec
+
