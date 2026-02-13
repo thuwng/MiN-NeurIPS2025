@@ -15,7 +15,7 @@ import os
 from data_process.data_manger import DataManger
 from utils.training_tool import get_optimizer, get_scheduler
 from utils.toolkit import calculate_class_metrics, calculate_task_metrics
-from trainer.BaseTrainer import compute_fisher, compute_fisher_safe
+from trainer.BaseTrainer import compute_fisher
 
 EPSILON = 1e-8
 
@@ -95,6 +95,35 @@ class MinNet(object):
         for i in range(len(targets)):
             targets[i] = datamanger.map_cat2order(targets[i])
         return targets
+    
+    def compute_fisher_safe(self, dataloader):
+        """
+        Compute Fisher information safely:
+        - Freeze backbone
+        - Only allow noise + normal_fc to require grad
+        - Avoid OOM
+        """
+
+        # 1. Freeze all params
+        for p in self._network.parameters():
+            p.requires_grad = False
+
+        # 2. Enable grad ONLY for noise + classifier
+        if hasattr(self._network.backbone, "noise_maker"):
+            for p in self._network.backbone.noise_maker.parameters():
+                p.requires_grad = True
+
+        for p in self._network.normal_fc.parameters():
+            p.requires_grad = True
+
+        # 3. Compute fisher
+        fisher = compute_fisher(self._network, dataloader)
+
+        # 4. Freeze everything again
+        for p in self._network.parameters():
+            p.requires_grad = False
+
+        return fisher
 
     def init_train(self, data_manger):
         self.cur_task += 1

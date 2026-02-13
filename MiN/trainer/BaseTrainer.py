@@ -112,7 +112,6 @@ def compute_fisher_safe(self, dataloader):
     for p in self._network.parameters():
         p.requires_grad = False
 
-    # Chỉ cho phép noise + fc
     for p in self._network.noise_maker.parameters():
         p.requires_grad = True
     for p in self._network.normal_fc.parameters():
