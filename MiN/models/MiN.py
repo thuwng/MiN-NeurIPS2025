@@ -97,38 +97,30 @@ class MinNet(object):
         return targets
     
     def compute_fisher_safe(self, dataloader):
-        """
-        Compute Fisher information safely:
-        - Freeze backbone
-        - Only allow noise + normal_fc to require grad
-        - Avoid OOM
-        """
+        net = self._network
+        net.eval()  
 
         # 1. Freeze all params
-        for p in self._network.parameters():
-            p.requires_grad = False
+        for p in net.parameters():
+            p.requires_grad_(False)
 
         # 2. Enable grad ONLY for noise + classifier
-        if hasattr(self._network.backbone, "noise_maker"):
-            for p in self._network.backbone.noise_maker.parameters():
-                p.requires_grad = True
+        if hasattr(net.backbone, "noise_maker"):
+            for p in net.backbone.noise_maker.parameters():
+                p.requires_grad_(True)
 
-        for p in self._network.normal_fc.parameters():
-            p.requires_grad = True
-
-        #print("===== DEBUG FISHER =====")
-        #for _, inputs, targets in dataloader:
-        #    print("targets min/max:", targets.min().item(), targets.max().item())
-        #    break
-        #print("current fc out dim:", self._network.normal_fc.out_features)
-        #print("========================")
+        for p in net.normal_fc.parameters():
+            p.requires_grad_(True)
 
         # 3. Compute fisher
-        fisher = compute_fisher(self._network, dataloader)
+        fisher = compute_fisher(net, dataloader)
 
-        # 4. Freeze everything again
-        for p in self._network.parameters():
-            p.requires_grad = False
+        # 4. Restore model for training
+        for p in net.parameters():
+            p.requires_grad_(True)
+
+        net.train()               
+        torch.cuda.empty_cache()  
 
         return fisher
 
