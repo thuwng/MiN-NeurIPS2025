@@ -200,3 +200,12 @@ class MiNbaseNet(nn.Module):
                 p.requires_grad = True
         for p in self.backbone.norm.parameters():
             p.requires_grad = True
+
+    def get_feature_importance(fisher, backbone, device):
+        importance = torch.zeros(backbone.embed_dim).to(device)
+
+        for name, param in backbone.named_parameters():
+            if name in fisher and param.dim() == 2:
+                importance += fisher[name].mean(dim=0)
+
+        return importance / (importance.norm() + 1e-8)

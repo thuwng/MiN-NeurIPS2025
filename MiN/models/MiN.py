@@ -15,6 +15,7 @@ import os
 from data_process.data_manger import DataManger
 from utils.training_tool import get_optimizer, get_scheduler
 from utils.toolkit import calculate_class_metrics, calculate_task_metrics
+from trainer.BaseTrainer import compute_fisher
 
 EPSILON = 1e-8
 
@@ -122,6 +123,8 @@ class MinNet(object):
         prototype = self.get_task_prototype(self._network, train_loader)
         self._network.extend_task_prototype(prototype)
         self.run(train_loader)
+        fisher = compute_fisher(self._network, train_loader)
+        self.pass_fisher_to_backbone(fisher, train_loader)
         prototype = self.get_task_prototype(self._network, train_loader)
         self._network.update_task_prototype(prototype)
         train_loader = DataLoader(train_set, batch_size=self.buffer_batch, shuffle=True,
@@ -178,6 +181,8 @@ class MinNet(object):
         prototype = self.get_task_prototype(self._network, train_loader)
         self._network.extend_task_prototype(prototype)
         self.run(train_loader)
+        fisher = compute_fisher(self._network, train_loader)
+        self.pass_fisher_to_backbone(fisher, train_loader)
         prototype = self.get_task_prototype(self._network, train_loader)
         self._network.update_task_prototype(prototype)
 
@@ -339,3 +344,18 @@ class MinNet(object):
         prototype = torch.mean(torch.concat(features, dim=0), dim=0)
         return prototype
             
+    def pass_fisher_to_backbone(self, fisher_dict):
+        backbone = self._network.backbone
+        importance = torch.zeros(backbone.embed_dim).to(self.device)
+
+        for name, param in backbone.named_parameters():
+            if name in fisher_dict:
+                fisher_val = fisher_dict[name]
+
+                if param.dim() == 2:
+                    importance += fisher_val.mean(dim=0)
+
+        importance = importance / (importance.norm() + 1e-8)
+
+        for noise_layer in backbone.noise_maker:
+            noise_layer.set_fisher(importance)

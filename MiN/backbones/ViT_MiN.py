@@ -61,9 +61,9 @@ class Noise_weigh(nn.Module):
         return x * self.weight
 
 
-class PiNoise(torch.nn.Linear):
+class PiNoise(nn.Module):
     def __init__(self, in_dim, out_dim, hidden_dim=384):
-        super(torch.nn.Linear, self).__init__()
+        super().__init__()
 
         self.bias = None
 
@@ -71,13 +71,12 @@ class PiNoise(torch.nn.Linear):
         torch.nn.init.constant_(self.MLP.weight, 0)
         torch.nn.init.constant_(self.MLP.bias, 0)
 
-        device = torch.device("cuda:{}".format(0))
-        factory_kwargs = {"device": device, "dtype": torch.float}
+        factory_kwargs = {"dtype": torch.float}
 
         self.hidden_dim = hidden_dim
 
         self.w_down = torch.empty((in_dim, self.hidden_dim), **factory_kwargs)
-        self.register_buffer("weight", self.w_down)
+        self.register_buffer("w_down", self.w_down)
 
         self.reset_parameters()
 
@@ -87,10 +86,14 @@ class PiNoise(torch.nn.Linear):
         self.sigmma = nn.ModuleList()
 
         self.w_up = torch.empty((self.hidden_dim, out_dim), **factory_kwargs)
-        self.register_buffer("weight", self.w_up)
+        self.register_buffer("w_up", self.w_up)
         self.reset_parameters()
 
         self.weight_noise = None
+        self.fisher_importance = None
+
+        self.fisher_history = []
+        self.alpha = 0.5
 
     def update_noise(self):
 
@@ -112,20 +115,32 @@ class PiNoise(torch.nn.Linear):
     def init_weight_noise(self, prototypes):
         if len(prototypes) <= 1:
             self.weight_noise = torch.zeros(len(self.mu), requires_grad=True)
-        else:
-            self.weight_noise = torch.zeros(len(self.mu), requires_grad=True)
-            weight = torch.ones(len(self.mu))
-            for i in range(len(prototypes)):
-                mu_t = prototypes[-1]
-                mu_i = prototypes[i]
-                dot_product = torch.dot(mu_t, mu_i)
-                norm_t = torch.norm(mu_t)
-                norm_i = torch.norm(mu_i)
-                s_i = dot_product / (norm_t * norm_i)
-                weight[i] = s_i.detach().clone()
-            weight = torch.softmax(weight, dim=-1)
-            self.weight_noise = weight
-            self.weight_noise.requires_grad = True
+            return
+
+        weight = torch.zeros(len(self.mu))
+
+        # Fisher của task mới nhất
+        F_t = self.fisher_history[-1]
+
+        for i in range(len(prototypes)):
+            mu_t = prototypes[-1]
+            mu_i = prototypes[i]
+
+            # --- prototype similarity ---
+            proto_sim = torch.cosine_similarity(mu_t, mu_i, dim=0)
+
+            # --- fisher similarity ---
+            F_i = self.fisher_history[i]
+            fisher_sim = torch.cosine_similarity(F_t, F_i, dim=0)
+
+            # --- mixture ---
+            s_i = self.alpha * proto_sim + (1 - self.alpha) * fisher_sim
+
+            weight[i] = s_i.detach()
+
+        weight = torch.softmax(weight, dim=-1)
+
+        self.weight_noise = nn.Parameter(weight)
             
     def unfreeze_noise(self):
 
@@ -140,14 +155,24 @@ class PiNoise(torch.nn.Linear):
         x_down = hyper_features @ self.w_down
 
         noise = None
+        mask = self.get_fisher_mask(x_down)
+
+        if self.weight_noise is None:
+            weight = torch.ones(len(self.mu), device=x_down.device)
+            weight = weight / len(self.mu)
+        else:
+            weight = self.weight_noise
 
         for i in range(len(self.mu)):
             mu = self.mu[i](x_down)
             sigmma = self.sigmma[i](x_down)
+            
+            cur_noise = (mu + sigmma) * mask * weight[i]
+
             if noise is None:
-                noise = (mu + sigmma) * self.weight_noise[i]
+                noise = cur_noise
             else:
-                noise += (mu + sigmma) * self.weight_noise[i]
+                noise += cur_noise
 
         noise = noise @ self.w_up
 
@@ -161,11 +186,33 @@ class PiNoise(torch.nn.Linear):
         mu = self.mu[-1](x_down)
         sigmma = self.sigmma[-1](x_down)
 
-        noise = (mu + sigmma) * self.weight_noise[-1]
+        mask = self.get_fisher_mask(x_down)
+
+        if self.weight_noise is None:
+            weight = torch.ones(len(self.mu), device=x_down.device)
+            weight = weight / len(self.mu)
+        else:
+            weight = self.weight_noise
+
+        noise = (mu + sigmma) * mask * weight[-1]
 
         noise = noise @ self.w_up
 
         return x1 + noise + hyper_features
+    
+    def set_fisher(self, fisher_vec):
+        self.fisher_importance = fisher_vec
+
+    def get_fisher_mask(self, x_down):
+        if self.fisher_importance is None:
+            return 1.0
+
+        # project fisher -> hidden space
+        mask = self.fisher_importance @ self.w_down
+        mask = torch.exp(-mask)
+        return mask
+
+
 
 
 class Attention(nn.Module):

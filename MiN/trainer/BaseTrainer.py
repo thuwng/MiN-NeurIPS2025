@@ -1,6 +1,7 @@
 import sys
 import logging
 import torch
+import torch.nn.functional as F
 from utils.factory import get_model
 from data_process.data_manger import DataManger
 import os
@@ -55,6 +56,12 @@ def _train(args):
 
     model.init_train(data_manger=datamanger)
     model.after_train(data_manger=datamanger)
+
+    loader = datamanger.get_train_loader()   
+    fisher = compute_fisher(model, loader)
+    model.fisher_list.append(fisher)
+    model.pass_fisher_to_backbone(fisher)
+
     save_path = os.path.join(workdir, 'task_0_check_point.pth')
     if args["save_all_checkpoint"] is True:
         model.save_check_point(save_path)
@@ -63,6 +70,12 @@ def _train(args):
         save_path = os.path.join(workdir, 'task_{}_check_point.pth'.format(i+1))
         model.increment_train(data_manger=datamanger)
         model.after_train(data_manger=datamanger)
+
+        loader = datamanger.get_train_loader()
+        fisher = compute_fisher(model, loader)
+        model.fisher_list.append(fisher)
+        model.pass_fisher_to_backbone(fisher)
+
         if args["save_all_checkpoint"] is True:
             model.save_check_point(save_path)
     save_path = os.path.join(logs_name, 'Last_check_point.pth')
@@ -94,3 +107,26 @@ def _set_random(seed: int = 0):
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = True
+
+def compute_fisher(model, dataloader):
+    fisher = {}
+
+    for name, param in model.named_parameters():
+        fisher[name] = torch.zeros_like(param)
+
+    model.eval()
+
+    for images, labels in dataloader:
+        outputs = model(images)["logits"]
+        loss = F.cross_entropy(outputs, labels)
+
+        model.zero_grad()
+        loss.backward()
+
+        for name, param in model.named_parameters():
+            fisher[name] += param.grad ** 2
+
+    for name in fisher:
+        fisher[name] /= len(dataloader)
+
+    return fisher
