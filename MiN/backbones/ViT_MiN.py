@@ -75,8 +75,11 @@ class PiNoise(nn.Module):
 
         self.hidden_dim = hidden_dim
 
-        self.w_down = torch.empty((in_dim, self.hidden_dim), **factory_kwargs)
-        self.register_buffer("w_down", self.w_down)
+        self.register_buffer(
+            "w_down",
+            torch.empty((in_dim, self.hidden_dim))
+        )
+
 
         self.reset_parameters()
 
@@ -85,8 +88,11 @@ class PiNoise(nn.Module):
         self.mu = nn.ModuleList()
         self.sigmma = nn.ModuleList()
 
-        self.w_up = torch.empty((self.hidden_dim, out_dim), **factory_kwargs)
-        self.register_buffer("w_up", self.w_up)
+        self.register_buffer(
+            "w_up",
+            torch.empty((out_dim, self.hidden_dim))
+        )
+
         self.reset_parameters()
 
         self.weight_noise = None
