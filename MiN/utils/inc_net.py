@@ -148,7 +148,7 @@ class MiNbaseNet(nn.Module):
         self.weight += self.R @ X.T @ (Y - X @ self.weight)
 
     def forward(self, x, new_forward: bool = False):
-
+        
         if new_forward:
             hyper_features = self.backbone(x, new_forward=True)
         else:

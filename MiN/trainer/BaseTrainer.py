@@ -110,8 +110,7 @@ def _set_random(seed: int = 0):
 
 def compute_fisher(model, dataloader):
     fisher = {}
-
-    device = next(model.parameters()).device  # <<< LẤY DEVICE CỦA MODEL
+    device = next(model.parameters()).device
 
     for name, param in model.named_parameters():
         fisher[name] = torch.zeros_like(param)
@@ -120,21 +119,15 @@ def compute_fisher(model, dataloader):
 
     for batch in dataloader:
 
-        # ---- unpack ----
-        if isinstance(batch, (list, tuple)):
-            images, labels = batch[0], batch[1]
-        elif isinstance(batch, dict):
-            images, labels = batch["image"], batch["label"]
+        if len(batch) == 3:
+            _, images, labels = batch
+        elif len(batch) == 2:
+            images, labels = batch
         else:
-            raise ValueError(f"Unknown batch type: {type(batch)}")
+            raise ValueError("Unexpected batch format")   
 
-        # ---- MOVE TO DEVICE (QUAN TRỌNG) ----
         images = images.to(device, non_blocking=True)
         labels = labels.to(device, non_blocking=True)
-
-        # ---- ensure 4D ----
-        if images.dim() == 3:
-            images = images.unsqueeze(0)
 
         outputs = model(images)["logits"]
         loss = F.cross_entropy(outputs, labels)
@@ -150,3 +143,4 @@ def compute_fisher(model, dataloader):
         fisher[name] /= len(dataloader)
 
     return fisher
+
