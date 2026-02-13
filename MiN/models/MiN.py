@@ -242,6 +242,35 @@ class MinNet(object):
             self.logger.info(info)
             prog_bar.set_description(info)
 
+    def compute_fisher_safe(self, dataloader):
+        """
+        Compute Fisher safely:
+        - Freeze all params
+        - Enable grad only for noise + classifier
+        """
+
+        # 1. Freeze everything
+        for p in self._network.parameters():
+            p.requires_grad = False
+
+        # 2. Enable noise
+        if hasattr(self._network.backbone, "noise_maker"):
+            for p in self._network.backbone.noise_maker.parameters():
+                p.requires_grad = True
+
+        # 3. Enable classifier
+        for p in self._network.normal_fc.parameters():
+            p.requires_grad = True
+
+        # 4. Compute fisher (your corrected version)
+        fisher = compute_fisher(self._network, dataloader)
+
+        # 5. Freeze again
+        for p in self._network.parameters():
+            p.requires_grad = False
+
+        return fisher
+
     def run(self, train_loader):
 
         if self.cur_task == 0:
@@ -326,7 +355,7 @@ class MinNet(object):
                             for mu_layer in noise_layer.mu:
 
                                 noise_weight = mu_layer.weight.view(-1)
-                                
+
                                 min_len = min(noise_weight.numel(), fisher_flat.numel())
 
                                 fisher_loss += (
