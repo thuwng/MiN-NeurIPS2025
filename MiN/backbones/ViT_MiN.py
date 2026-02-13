@@ -71,7 +71,7 @@ class PiNoise(nn.Module):
         torch.nn.init.constant_(self.MLP.weight, 0)
         torch.nn.init.constant_(self.MLP.bias, 0)
 
-        factory_kwargs = {"dtype": torch.float}
+
 
         self.hidden_dim = hidden_dim
 
@@ -87,7 +87,7 @@ class PiNoise(nn.Module):
 
         self.register_buffer(
             "w_up",
-            torch.empty((out_dim, self.hidden_dim))
+            torch.empty((self.hidden_dim, out_dim))
         )
 
         self.weight_noise = None
@@ -158,24 +158,16 @@ class PiNoise(nn.Module):
         noise = None
         mask = self.get_fisher_mask(x_down)
 
-        if self.weight_noise is None:
-            weight = torch.ones(len(self.mu), device=x_down.device)
-            weight = weight / len(self.mu)
-        else:
-            weight = self.weight_noise
-
+        noise = 0
         for i in range(len(self.mu)):
             mu = self.mu[i](x_down)
-            sigmma = self.sigmma[i](x_down)
-            
-            cur_noise = (mu + sigmma) * mask * weight[i]
-
-            if noise is None:
-                noise = cur_noise
-            else:
-                noise += cur_noise
+            sigma = self.sigma[i](x_down)
+            noise += mu + sigma
 
         noise = noise @ self.w_up
+
+        mask = self.get_fisher_mask(hyper_features)
+        noise = noise * mask
 
         return x1 + noise + hyper_features
 
@@ -187,31 +179,23 @@ class PiNoise(nn.Module):
         mu = self.mu[-1](x_down)
         sigmma = self.sigmma[-1](x_down)
 
-        mask = self.get_fisher_mask(x_down)
-
-        if self.weight_noise is None:
-            weight = torch.ones(len(self.mu), device=x_down.device)
-            weight = weight / len(self.mu)
-        else:
-            weight = self.weight_noise
-
-        noise = (mu + sigmma) * mask * weight[-1]
-
+        noise = mu + sigmma
         noise = noise @ self.w_up
+
+        mask = self.get_fisher_mask(hyper_features)
+        noise = noise * mask
 
         return x1 + noise + hyper_features
     
     def set_fisher(self, fisher_vec):
         self.fisher_importance = fisher_vec
 
-    def get_fisher_mask(self, x_down):
+    def get_fisher_mask(self, hyper_features):
         if self.fisher_importance is None:
             return 1.0
-
-        # project fisher -> hidden space
-        mask = self.fisher_importance @ self.w_down
-        mask = torch.exp(-mask)
-        return mask
+        mask = torch.exp(-self.fisher_importance)
+        
+        return mask.view(1,1,-1)
 
 
 
