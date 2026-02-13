@@ -90,6 +90,9 @@ class PiNoise(nn.Module):
             torch.empty((self.hidden_dim, out_dim))
         )
 
+        nn.init.orthogonal_(self.w_down)
+        nn.init.orthogonal_(self.w_up)
+
         self.weight_noise = None
         self.fisher_importance = None
 
@@ -161,7 +164,7 @@ class PiNoise(nn.Module):
         noise = 0
         for i in range(len(self.mu)):
             mu = self.mu[i](x_down)
-            sigma = self.sigma[i](x_down)
+            sigma = self.sigmma[i](x_down)
             noise += mu + sigma
 
         noise = noise @ self.w_up
@@ -194,7 +197,7 @@ class PiNoise(nn.Module):
         if self.fisher_importance is None:
             return 1.0
         mask = torch.exp(-self.fisher_importance)
-        
+
         return mask.view(1,1,-1)
 
 
