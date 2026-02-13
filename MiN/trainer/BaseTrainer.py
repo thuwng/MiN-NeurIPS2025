@@ -117,8 +117,20 @@ def compute_fisher(model, dataloader):
     model.eval()
 
     for batch in dataloader:
-        images = batch[0]
-        labels = batch[1]
+
+        # ---- robust unpack ----
+        if isinstance(batch, (list, tuple)):
+            images = batch[0]
+            labels = batch[1]
+        elif isinstance(batch, dict):
+            images = batch["image"]
+            labels = batch["label"]
+        else:
+            raise ValueError(f"Unknown batch type: {type(batch)}")
+
+        # ---- ensure 4D tensor ----
+        if images.dim() == 3:
+            images = images.unsqueeze(0)
 
         outputs = model(images)["logits"]
         loss = F.cross_entropy(outputs, labels)
@@ -128,7 +140,7 @@ def compute_fisher(model, dataloader):
 
         for name, param in model.named_parameters():
             if param.grad is not None:
-                fisher[name] += param.grad ** 2
+                fisher[name] += param.grad.detach() ** 2
 
     for name in fisher:
         fisher[name] /= len(dataloader)
