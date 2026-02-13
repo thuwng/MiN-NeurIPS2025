@@ -97,14 +97,15 @@ class MinNet(object):
         return targets
     
     def compute_fisher_safe(self, dataloader):
-        net = self._network
-        net.eval()  
 
-        # 1. Freeze all params
+        net = self._network
+        net.eval()
+
+        # 1️⃣ Freeze tất cả
         for p in net.parameters():
             p.requires_grad_(False)
 
-        # 2. Enable grad ONLY for noise + classifier
+        # 2️⃣ Enable noise + normal_fc
         if hasattr(net.backbone, "noise_maker"):
             for p in net.backbone.noise_maker.parameters():
                 p.requires_grad_(True)
@@ -112,15 +113,15 @@ class MinNet(object):
         for p in net.normal_fc.parameters():
             p.requires_grad_(True)
 
-        # 3. Compute fisher
+        # 3️⃣ Compute fisher
         fisher = compute_fisher(net, dataloader)
 
-        # 4. Restore model for training
+        # 4️⃣ Restore toàn bộ
         for p in net.parameters():
             p.requires_grad_(True)
 
-        net.train()               
-        torch.cuda.empty_cache()  
+        net.train()
+        torch.cuda.empty_cache()
 
         return fisher
 

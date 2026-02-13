@@ -109,12 +109,15 @@ def _set_random(seed: int = 0):
     torch.backends.cudnn.benchmark = True
 
 def compute_fisher(model, dataloader):
+
     device = next(model.parameters()).device
     model.eval()
 
-    for name, p in model.named_parameters():
-        if "fc" not in name and "classifier" not in name:
-            p.requires_grad_(False)
+    # Lấy params thực sự cần grad
+    params = [p for p in model.parameters() if p.requires_grad]
+
+    if len(params) == 0:
+        raise RuntimeError("No parameters require grad for Fisher computation")
 
     fisher = {
         name: torch.zeros_like(p, device=device)
@@ -132,30 +135,37 @@ def compute_fisher(model, dataloader):
         images = images.to(device, non_blocking=True)
         labels = labels.to(device, non_blocking=True)
 
-        outputs = model(images)["logits"]
-        loss = F.cross_entropy(outputs, labels)
+        # ⚠️ BẮT BUỘC dùng forward giống training
+        outputs = model.forward_normal_fc(images, new_forward=False)
+        logits = outputs["logits"]
+
+        # DEBUG an toàn
+        if labels.max() >= logits.size(1):
+            raise RuntimeError(
+                f"Label out of range: max={labels.max()} but logits dim={logits.size(1)}"
+            )
+
+        loss = F.cross_entropy(logits, labels)
 
         grads = torch.autograd.grad(
             loss,
-            [p for p in model.parameters() if p.requires_grad],
+            params,
             retain_graph=False,
-            create_graph=False
+            create_graph=False,
+            allow_unused=True
         )
 
         for (name, p), g in zip(
             [(n, p) for n, p in model.named_parameters() if p.requires_grad],
             grads
         ):
-            fisher[name] += g.detach() ** 2
+            if g is not None:
+                fisher[name] += g.detach() ** 2
 
-        del images, labels, outputs, loss, grads
+        del images, labels, outputs, logits, loss, grads
         torch.cuda.empty_cache()
 
     for name in fisher:
         fisher[name] /= len(dataloader)
 
-    for p in model.parameters():
-        p.requires_grad_(True)
-
-    torch.cuda.empty_cache()
     return fisher
