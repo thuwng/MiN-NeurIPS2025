@@ -109,50 +109,47 @@ def _set_random(seed: int = 0):
     torch.backends.cudnn.benchmark = True
 
 def compute_fisher(model, dataloader):
-    fisher = {}
     device = next(model.parameters()).device
-
-    for name, param in model.named_parameters():
-        if param.requires_grad:
-            fisher[name] = torch.zeros_like(param)
-
     model.eval()
 
-    for batch in dataloader:
-        if len(batch) == 3:
-            _, images, labels = batch
-        else:
-            images, labels = batch
+    for name, p in model.named_parameters():
+        if "fc" not in name and "classifier" not in name:
+            p.requires_grad_(False)
 
-        images = images.to(device)
-        labels = labels.to(device)
+    fisher = {
+        name: torch.zeros_like(p, device=device)
+        for name, p in model.named_parameters()
+        if p.requires_grad
+    }
 
-        outputs = model.forward_normal_fc(images, new_forward=False)
-        logits = outputs["logits"]
+    for images, labels in dataloader:
+        images = images.to(device, non_blocking=True)
+        labels = labels.to(device, non_blocking=True)
 
-        print("===== DEBUG INSIDE FISHER =====")
-        print("logits shape:", logits.shape)
-        print("targets min/max:", labels.min().item(), labels.max().item())
-        print("================================")
-
-        loss = F.cross_entropy(logits, labels)
+        outputs = model(images)["logits"]
+        loss = F.cross_entropy(outputs, labels)
 
         grads = torch.autograd.grad(
             loss,
             [p for p in model.parameters() if p.requires_grad],
             retain_graph=False,
-            create_graph=False,
-            allow_unused=True
+            create_graph=False
         )
 
-        idx = 0
-        for name, param in model.named_parameters():
-            if param.requires_grad:
-                if grads[idx] is not None:
-                    fisher[name] += grads[idx].detach() ** 2
-                idx += 1
+        for (name, p), g in zip(
+            [(n, p) for n, p in model.named_parameters() if p.requires_grad],
+            grads
+        ):
+            fisher[name] += g.detach() ** 2
+
+        del images, labels, outputs, loss, grads
+        torch.cuda.empty_cache()
 
     for name in fisher:
         fisher[name] /= len(dataloader)
 
+    for p in model.parameters():
+        p.requires_grad_(True)
+
+    torch.cuda.empty_cache()
     return fisher
