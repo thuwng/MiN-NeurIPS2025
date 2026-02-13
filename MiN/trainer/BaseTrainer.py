@@ -128,6 +128,10 @@ def compute_fisher(model, dataloader):
         labels = labels.to(device)
 
         outputs = model(images)["logits"]
+        print("===== DEBUG INSIDE FISHER =====")
+        print("logits shape:", logits.shape)
+        print("targets min/max:", targets.min().item(), targets.max().item())
+        print("================================")
         loss = F.cross_entropy(outputs, labels)
 
         grads = torch.autograd.grad(
