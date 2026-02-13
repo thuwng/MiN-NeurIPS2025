@@ -15,7 +15,7 @@ import os
 from data_process.data_manger import DataManger
 from utils.training_tool import get_optimizer, get_scheduler
 from utils.toolkit import calculate_class_metrics, calculate_task_metrics
-from trainer.BaseTrainer import compute_fisher
+from trainer.BaseTrainer import compute_fisher, compute_fisher_safe
 
 EPSILON = 1e-8
 
@@ -123,7 +123,7 @@ class MinNet(object):
         prototype = self.get_task_prototype(self._network, train_loader)
         self._network.extend_task_prototype(prototype)
         self.run(train_loader)
-        fisher = compute_fisher(self._network, train_loader)
+        fisher = self.compute_fisher_safe(train_loader)
         self.pass_fisher_to_backbone(fisher)
         prototype = self.get_task_prototype(self._network, train_loader)
         self._network.update_task_prototype(prototype)

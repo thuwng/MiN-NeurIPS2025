@@ -108,61 +108,59 @@ def _set_random(seed: int = 0):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = True
 
+def compute_fisher_safe(self, dataloader):
+    for p in self._network.parameters():
+        p.requires_grad = False
+
+    # Chỉ cho phép noise + fc
+    for p in self._network.noise_maker.parameters():
+        p.requires_grad = True
+    for p in self._network.normal_fc.parameters():
+        p.requires_grad = True
+
+    fisher = compute_fisher(self._network, dataloader)
+
+    for p in self._network.parameters():
+        p.requires_grad = False
+
+    return fisher
+
 def compute_fisher(model, dataloader):
     fisher = {}
     device = next(model.parameters()).device
 
     for name, param in model.named_parameters():
-        fisher[name] = torch.zeros_like(param)
+        if param.requires_grad:
+            fisher[name] = torch.zeros_like(param)
 
     model.eval()
-
-    with torch.no_grad():
-        for batch in dataloader:
-            if len(batch) == 3:
-                _, images, labels = batch
-            else:
-                images, labels = batch
-
-            images = images.to(device)
-            labels = labels.to(device)
-            outputs = model(images)["logits"]
-            num_classes = outputs.shape[1]
-            break
-
-    if num_classes == 0:
-        print("[FISHER] Skip: no classes yet")
-        return fisher
 
     for batch in dataloader:
         if len(batch) == 3:
             _, images, labels = batch
-        elif len(batch) == 2:
-            images, labels = batch
         else:
-            raise ValueError("Unexpected batch format")
+            images, labels = batch
 
-        images = images.to(device, non_blocking=True)
-        labels = labels.to(device, non_blocking=True)
+        images = images.to(device)
+        labels = labels.to(device)
 
         outputs = model(images)["logits"]
-        max_label = labels.max().item()
-        if max_label >= outputs.shape[1]:
-            raise ValueError(
-                f"[FISHER ERROR] label max {max_label} >= logits dim {outputs.shape[1]}"
-            )
-
         loss = F.cross_entropy(outputs, labels)
 
-        model.zero_grad()
-        loss.backward()
+        grads = torch.autograd.grad(
+            loss,
+            [p for p in model.parameters() if p.requires_grad],
+            retain_graph=False,
+            create_graph=False
+        )
 
+        idx = 0
         for name, param in model.named_parameters():
-            if param.grad is not None:
-                fisher[name] += param.grad.detach() ** 2
+            if param.requires_grad:
+                fisher[name] += grads[idx].detach() ** 2
+                idx += 1
 
     for name in fisher:
         fisher[name] /= len(dataloader)
 
     return fisher
-
