@@ -61,144 +61,188 @@ class Noise_weigh(nn.Module):
         return x * self.weight
 
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
 class PiNoise(nn.Module):
     def __init__(self, in_dim, out_dim, hidden_dim=384):
         super().__init__()
 
-        self.bias = None
-
-        self.MLP = nn.Linear(in_dim, out_dim)
-        torch.nn.init.constant_(self.MLP.weight, 0)
-        torch.nn.init.constant_(self.MLP.bias, 0)
-
-
-
+        self.in_dim = in_dim
+        self.out_dim = out_dim
         self.hidden_dim = hidden_dim
 
+        # ---------------- Base linear ----------------
+        self.MLP = nn.Linear(in_dim, out_dim)
+        nn.init.constant_(self.MLP.weight, 0.)
+        nn.init.constant_(self.MLP.bias, 0.)
+
+        # ---------------- Low-rank projection ----------------
         self.register_buffer(
             "w_down",
-            torch.empty((in_dim, self.hidden_dim))
+            torch.empty(in_dim, hidden_dim)
         )
-
-        self.act = nn.GELU()
-
-        self.mu = nn.ModuleList()
-        self.sigmma = nn.ModuleList()
-
         self.register_buffer(
             "w_up",
-            torch.empty((self.hidden_dim, out_dim))
+            torch.empty(hidden_dim, out_dim)
         )
 
         nn.init.orthogonal_(self.w_down)
         nn.init.orthogonal_(self.w_up)
 
+        # ---------------- Noise modules per task ----------------
+        self.mu = nn.ModuleList()
+        self.sigma = nn.ModuleList()
+
+        # trainable mixture weight
         self.weight_noise = None
+
+        # fisher
         self.fisher_importance = None
-
         self.fisher_history = []
-        self.alpha = 0.5
 
+        self.alpha = 0.5  # proto-fisher mixing
+
+    # ==========================================================
+    # Add new noise block (for new task)
+    # ==========================================================
     def update_noise(self):
 
-        if len(self.mu) == 0:
-            self.mu.append(nn.Linear(self.hidden_dim, self.hidden_dim))
-            torch.nn.init.constant_(self.mu[0].weight, 0.)
-            torch.nn.init.constant_(self.mu[0].bias, 0.)
-            self.sigmma.append(nn.Linear(self.hidden_dim, self.hidden_dim))
-            torch.nn.init.constant_(self.sigmma[0].weight, 0.)
-            torch.nn.init.constant_(self.sigmma[0].bias, 0.)
-        else:
-            self.mu.append(nn.Linear(self.hidden_dim, self.hidden_dim))
-            torch.nn.init.constant_(self.mu[-1].weight, 0.)
-            torch.nn.init.constant_(self.mu[-1].bias, 0.)
-            self.sigmma.append(nn.Linear(self.hidden_dim, self.hidden_dim))
-            torch.nn.init.constant_(self.sigmma[-1].weight, 0.)
-            torch.nn.init.constant_(self.sigmma[-1].bias, 0.)
-    
+        new_mu = nn.Linear(self.hidden_dim, self.hidden_dim)
+        new_sigma = nn.Linear(self.hidden_dim, self.hidden_dim)
+
+        nn.init.constant_(new_mu.weight, 0.)
+        nn.init.constant_(new_mu.bias, 0.)
+        nn.init.constant_(new_sigma.weight, 0.)
+        nn.init.constant_(new_sigma.bias, 0.)
+
+        self.mu.append(new_mu)
+        self.sigma.append(new_sigma)
+
+    # ==========================================================
+    # Initialize mixture weights
+    # ==========================================================
     def init_weight_noise(self, prototypes):
-        if len(prototypes) <= 1:
-            self.weight_noise = torch.zeros(len(self.mu), requires_grad=True)
+
+        n_task = len(self.mu)
+
+        if n_task == 0:
             return
 
-        weight = torch.zeros(len(self.mu))
+        device = prototypes[-1].device
 
-        # Fisher của task mới nhất
+        # First task
+        if len(prototypes) <= 1 or len(self.fisher_history) == 0:
+            weight = torch.ones(n_task, device=device) / n_task
+            self.weight_noise = nn.Parameter(weight)
+            return
+
+        weight = torch.zeros(n_task, device=device)
+
+        mu_t = prototypes[-1]
         F_t = self.fisher_history[-1]
 
-        for i in range(len(prototypes)):
-            mu_t = prototypes[-1]
+        for i in range(n_task):
             mu_i = prototypes[i]
-
-            # --- prototype similarity ---
-            proto_sim = torch.cosine_similarity(mu_t, mu_i, dim=0)
-
-            # --- fisher similarity ---
             F_i = self.fisher_history[i]
-            fisher_sim = torch.cosine_similarity(F_t, F_i, dim=0)
-
-            # --- mixture ---
+            proto_sim = F.cosine_similarity(mu_t, mu_i, dim=0)
+            fisher_sim = F.cosine_similarity(F_t, F_i, dim=0)
             s_i = self.alpha * proto_sim + (1 - self.alpha) * fisher_sim
-
+            
             weight[i] = s_i.detach()
 
-        weight = torch.softmax(weight, dim=-1)
+        weight = torch.softmax(weight, dim=0)
 
         self.weight_noise = nn.Parameter(weight)
-            
+
+    # ==========================================================
+    # Unfreeze newest task noise
+    # ==========================================================
     def unfreeze_noise(self):
+        for p in self.mu[-1].parameters():
+            p.requires_grad = True
+        for p in self.sigma[-1].parameters():
+            p.requires_grad = True
 
-        for param in self.mu[-1].parameters():
-            param.requires_grad = True
-        for param in self.sigmma[-1].parameters():
-            param.requires_grad = True
-
+    # ==========================================================
+    # Forward (all tasks)
+    # ==========================================================
     def forward(self, hyper_features):
-        x1 = self.MLP(hyper_features)
 
+
+        # base residual
+        base = self.MLP(hyper_features)
+
+        # fisher mask on input features
+        hyper_features = hyper_features * self.get_fisher_mask()
+
+        # low-rank down projection
         x_down = hyper_features @ self.w_down
 
-        noise = None
-        mask = self.get_fisher_mask(x_down)
-
+        # mixture noise
         noise = 0
+
+        if self.weight_noise is None:
+            weight = torch.ones(len(self.mu), device=x_down.device) / max(1, len(self.mu))
+        else:
+            weight = self.weight_noise
+
         for i in range(len(self.mu)):
             mu = self.mu[i](x_down)
-            sigma = self.sigmma[i](x_down)
-            noise += mu + sigma
+            sigma = self.sigma[i](x_down)
+            noise += (mu + sigma) * weight[i]
 
+        # up projection
         noise = noise @ self.w_up
 
-        mask = self.get_fisher_mask(hyper_features)
-        noise = noise * mask
+        return base + noise + hyper_features
 
-        return x1 + noise + hyper_features
-
+    # ==========================================================
+    # Forward only newest task
+    # ==========================================================
     def forward_new(self, hyper_features):
-        x1 = self.MLP(hyper_features)
+
+        base = self.MLP(hyper_features)
+
+        hyper_features = hyper_features * self.get_fisher_mask()
 
         x_down = hyper_features @ self.w_down
 
         mu = self.mu[-1](x_down)
-        sigmma = self.sigmma[-1](x_down)
+        sigma = self.sigma[-1](x_down)
 
-        noise = mu + sigmma
+        noise = mu + sigma
         noise = noise @ self.w_up
 
-        mask = self.get_fisher_mask(hyper_features)
-        noise = noise * mask
+        return base + noise + hyper_features
 
-        return x1 + noise + hyper_features
-    
+    # ==========================================================
+    # Fisher handling
+    # ==========================================================
     def set_fisher(self, fisher_vec):
-        self.fisher_importance = fisher_vec
+        """
+        fisher_vec must have shape (in_dim,)
+        """
+        self.fisher_importance = fisher_vec.detach()
+        self.fisher_history.append(fisher_vec.detach())
 
-    def get_fisher_mask(self, hyper_features):
+    def get_fisher_mask(self):
+
         if self.fisher_importance is None:
             return 1.0
-        mask = torch.exp(-self.fisher_importance)
 
-        return mask.view(1,1,-1)
+
+        # stability
+        fisher = self.fisher_importance
+
+        # normalize to avoid explosion
+        fisher = fisher / (fisher.mean() + 1e-8)
+
+        mask = torch.exp(-fisher)
+
+        return mask.view(1, -1)
 
 
 

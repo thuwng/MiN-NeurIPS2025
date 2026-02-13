@@ -116,7 +116,10 @@ def compute_fisher(model, dataloader):
 
     model.eval()
 
-    for images, labels in dataloader:
+    for batch in dataloader:
+        images = batch[0]
+        labels = batch[1]
+
         outputs = model(images)["logits"]
         loss = F.cross_entropy(outputs, labels)
 
@@ -124,7 +127,8 @@ def compute_fisher(model, dataloader):
         loss.backward()
 
         for name, param in model.named_parameters():
-            fisher[name] += param.grad ** 2
+            if param.grad is not None:
+                fisher[name] += param.grad ** 2
 
     for name in fisher:
         fisher[name] /= len(dataloader)
