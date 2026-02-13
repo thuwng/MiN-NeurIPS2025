@@ -131,14 +131,21 @@ class PiNoise(nn.Module):
         if n_task == 0:
             return
 
-        device = prototypes[-1].device
+        # ---------- CASE 1: no prototype yet ----------
+        if prototypes is None or len(prototypes) == 0:
+            weight = torch.ones(n_task) / n_task
+            self.weight_noise = nn.Parameter(weight)
+            return
 
-        # First task
-        if len(prototypes) <= 1 or len(self.fisher_history) == 0:
+        device = prototypes[0].device
+
+        # ---------- CASE 2: first task ----------
+        if len(prototypes) == 1 or len(self.fisher_history) == 0:
             weight = torch.ones(n_task, device=device) / n_task
             self.weight_noise = nn.Parameter(weight)
             return
 
+        # ---------- CASE 3: normal incremental ----------
         weight = torch.zeros(n_task, device=device)
 
         mu_t = prototypes[-1]
@@ -147,10 +154,11 @@ class PiNoise(nn.Module):
         for i in range(n_task):
             mu_i = prototypes[i]
             F_i = self.fisher_history[i]
+
             proto_sim = F.cosine_similarity(mu_t, mu_i, dim=0)
             fisher_sim = F.cosine_similarity(F_t, F_i, dim=0)
+
             s_i = self.alpha * proto_sim + (1 - self.alpha) * fisher_sim
-            
             weight[i] = s_i.detach()
 
         weight = torch.softmax(weight, dim=0)
@@ -184,7 +192,7 @@ class PiNoise(nn.Module):
         # mixture noise
         noise = 0
 
-        if self.weight_noise is None:
+        if self.weight_noise is None or len(self.weight_noise) != len(self.mu):
             weight = torch.ones(len(self.mu), device=x_down.device) / max(1, len(self.mu))
         else:
             weight = self.weight_noise
