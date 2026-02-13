@@ -129,10 +129,7 @@ class DataManger(Dataset):
             for i in range(len(source_data[1])):
                 if source_data[1][i] in class_list:
                     data.append(source_data[0][i])
-                    mapped_label = class_list.index(source_data[1][i])
-                    label.append(mapped_label)
-                    print("label min/max:", min(label), max(label))
-
+                    label.append(source_data[1][i])
             if len(data) == 0:
                 raise ValueError('No data')
         else:

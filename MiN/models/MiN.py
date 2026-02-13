@@ -173,7 +173,8 @@ class MinNet(object):
 
         self.fit_fc(train_loader, test_loader)
 
-        self._network.update_fc(self.increment)
+        new_total_class = self.known_class + self.increment
+        self._network.update_fc(new_total_class)
 
         train_loader = DataLoader(train_set, batch_size=self.batch_size, shuffle=True,
                                     num_workers=self.num_workers)
