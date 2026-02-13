@@ -122,7 +122,13 @@ def compute_fisher(model, dataloader):
         if p.requires_grad
     }
 
-    for images, labels in dataloader:
+    for batch in dataloader:
+
+        if len(batch) == 3:
+            _, images, labels = batch
+        else:
+            images, labels = batch
+
         images = images.to(device, non_blocking=True)
         labels = labels.to(device, non_blocking=True)
 
