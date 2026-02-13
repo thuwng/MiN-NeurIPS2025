@@ -116,6 +116,13 @@ class MinNet(object):
         for p in self._network.normal_fc.parameters():
             p.requires_grad = True
 
+        print("===== DEBUG FISHER =====")
+        for _, inputs, targets in dataloader:
+            print("targets min/max:", targets.min().item(), targets.max().item())
+            break
+        print("current fc out dim:", self._network.normal_fc.out_features)
+        print("========================")
+
         # 3. Compute fisher
         fisher = compute_fisher(self._network, dataloader)
 
@@ -203,6 +210,8 @@ class MinNet(object):
         self.fit_fc(train_loader, test_loader)
 
         new_total_class = self.known_class + self.increment
+        print("FC updated to:", new_total_class)
+        print("known_class:", self.known_class)
         self._network.update_fc(new_total_class)
 
         train_loader = DataLoader(train_set, batch_size=self.batch_size, shuffle=True,
@@ -309,10 +318,26 @@ class MinNet(object):
                     outputs2 = self._network.forward_normal_fc(inputs, new_forward=False)
                     logits2 = outputs2['logits']
                     logits2 = logits2 + logits1
+
+                    print("===== DEBUG RUN TASK >0 =====")
+                    print("cur_task:", self.cur_task)
+                    print("logits2 shape:", logits2.shape)
+                    print("targets min/max:", targets.min().item(), targets.max().item())
+                    print("known_class:", self.known_class)
+                    print("==============================")
+
                     loss = F.cross_entropy(logits2, targets.long())
                 else:
                     outputs = self._network.forward_normal_fc(inputs, new_forward=False)
                     logits = outputs["logits"]
+
+                    print("===== DEBUG RUN TASK 0 =====")
+                    print("cur_task:", self.cur_task)
+                    print("logits shape:", logits.shape)
+                    print("targets min/max:", targets.min().item(), targets.max().item())
+                    print("init_class:", self.init_class)
+                    print("=============================")
+
                     loss = F.cross_entropy(logits, targets.long())
 
                 optimizer.zero_grad()

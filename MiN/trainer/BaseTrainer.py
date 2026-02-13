@@ -108,22 +108,6 @@ def _set_random(seed: int = 0):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = True
 
-def compute_fisher_safe(self, dataloader):
-    for p in self._network.parameters():
-        p.requires_grad = False
-
-    for p in self._network.noise_maker.parameters():
-        p.requires_grad = True
-    for p in self._network.normal_fc.parameters():
-        p.requires_grad = True
-
-    fisher = compute_fisher(self._network, dataloader)
-
-    for p in self._network.parameters():
-        p.requires_grad = False
-
-    return fisher
-
 def compute_fisher(model, dataloader):
     fisher = {}
     device = next(model.parameters()).device
