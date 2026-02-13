@@ -127,24 +127,29 @@ def compute_fisher(model, dataloader):
         images = images.to(device)
         labels = labels.to(device)
 
-        outputs = model(images)["logits"]
+        outputs = model.forward_normal_fc(images, new_forward=False)
+        logits = outputs["logits"]
+
         print("===== DEBUG INSIDE FISHER =====")
         print("logits shape:", logits.shape)
-        print("targets min/max:", targets.min().item(), targets.max().item())
+        print("targets min/max:", labels.min().item(), labels.max().item())
         print("================================")
-        loss = F.cross_entropy(outputs, labels)
+
+        loss = F.cross_entropy(logits, labels)
 
         grads = torch.autograd.grad(
             loss,
             [p for p in model.parameters() if p.requires_grad],
             retain_graph=False,
-            create_graph=False
+            create_graph=False,
+            allow_unused=True
         )
 
         idx = 0
         for name, param in model.named_parameters():
             if param.requires_grad:
-                fisher[name] += grads[idx].detach() ** 2
+                if grads[idx] is not None:
+                    fisher[name] += grads[idx].detach() ** 2
                 idx += 1
 
     for name in fisher:
