@@ -80,9 +80,6 @@ class PiNoise(nn.Module):
             torch.empty((in_dim, self.hidden_dim))
         )
 
-
-        self.reset_parameters()
-
         self.act = nn.GELU()
 
         self.mu = nn.ModuleList()
@@ -92,8 +89,6 @@ class PiNoise(nn.Module):
             "w_up",
             torch.empty((out_dim, self.hidden_dim))
         )
-
-        self.reset_parameters()
 
         self.weight_noise = None
         self.fisher_importance = None
