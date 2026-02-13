@@ -109,40 +109,33 @@ def _set_random(seed: int = 0):
     torch.backends.cudnn.benchmark = True
 
 def compute_fisher(model, dataloader):
-    fisher = {name: torch.zeros_like(p) for name, p in model.named_parameters()}
+    fisher = {}
+
+    device = next(model.parameters()).device  # <<< LẤY DEVICE CỦA MODEL
+
+    for name, param in model.named_parameters():
+        fisher[name] = torch.zeros_like(param)
 
     model.eval()
 
     for batch in dataloader:
 
-        # ====== FIND IMAGE & LABEL AUTOMATICALLY ======
-        images, labels = None, None
-
+        # ---- unpack ----
         if isinstance(batch, (list, tuple)):
-            for item in batch:
-                if torch.is_tensor(item):
-                    if item.dim() >= 3 and item.size(-1) >= 32:
-                        images = item
-                    elif item.dim() <= 1:
-                        labels = item
+            images, labels = batch[0], batch[1]
         elif isinstance(batch, dict):
-            for k, v in batch.items():
-                if torch.is_tensor(v):
-                    if v.dim() >= 3:
-                        images = v
-                    elif v.dim() <= 1:
-                        labels = v
+            images, labels = batch["image"], batch["label"]
+        else:
+            raise ValueError(f"Unknown batch type: {type(batch)}")
 
-        if images is None or labels is None:
-            raise RuntimeError(
-                f"Cannot infer images/labels from batch:\n{batch}"
-            )
+        # ---- MOVE TO DEVICE (QUAN TRỌNG) ----
+        images = images.to(device, non_blocking=True)
+        labels = labels.to(device, non_blocking=True)
 
-        # ====== ENSURE SHAPE (B, C, H, W) ======
+        # ---- ensure 4D ----
         if images.dim() == 3:
             images = images.unsqueeze(0)
 
-        print("DEBUG images:", images.shape, images.dtype)
         outputs = model(images)["logits"]
         loss = F.cross_entropy(outputs, labels)
 
