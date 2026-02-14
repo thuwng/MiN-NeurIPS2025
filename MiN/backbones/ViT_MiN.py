@@ -177,9 +177,7 @@ class PiNoise(nn.Module):
 
         # base residual
         base = self.MLP(hyper_features)
-
-        # fisher mask on input features
-        hyper_features = hyper_features * self.get_fisher_mask()
+        
 
         # low-rank down projection
         x_down = hyper_features @ self.w_down
@@ -209,7 +207,6 @@ class PiNoise(nn.Module):
 
         base = self.MLP(hyper_features)
 
-        hyper_features = hyper_features * self.get_fisher_mask()
 
         x_down = hyper_features @ self.w_down
 
