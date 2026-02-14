@@ -121,12 +121,13 @@ def compute_fisher(model, dataloader):
         features = features.detach().requires_grad_(True)
         if features.grad is not None:
             features.grad.zero_()
+        print("Features shape:", features.shape)
 
         # ---- Classifier ONLY (NO PiNoise) ----
-        logits = model.forward_fc(features)["logits"]
+        logits = model.normal_fc(features)["logits"]
         loss = F.cross_entropy(logits, labels)
 
-        model.zero_grad(set_to_none=True)
+        model.normal_fc.zero_grad(set_to_none=True)
         loss.backward()
 
         fisher = features.grad.detach().pow(2).mean(dim=0)
