@@ -118,6 +118,7 @@ def compute_fisher(model, dataloader):
 
         # ---- Backbone only ----
         features = model.backbone(images)
+        features = model.buffer(features)
         features = features.detach().requires_grad_(True)
         if features.grad is not None:
             features.grad.zero_()
