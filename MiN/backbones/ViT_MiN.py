@@ -225,11 +225,13 @@ class PiNoise(nn.Module):
     # Fisher handling
     # ==========================================================
     def set_fisher(self, fisher_vec):
-        """
-        fisher_vec must have shape (in_dim,)
-        """
-        self.fisher_importance = fisher_vec.detach()
-        self.fisher_history.append(fisher_vec.detach())
+        fisher_vec = fisher_vec.detach()
+        fisher_vec = fisher_vec / (fisher_vec.mean() + 1e-8)
+
+        fisher_vec = fisher_vec.to(dtype=torch.float16)
+
+        self.fisher_importance = fisher_vec
+        self.fisher_history.append(fisher_vec)
 
     def get_fisher_mask(self):
 
@@ -245,15 +247,6 @@ class PiNoise(nn.Module):
 
         mask = torch.exp(-fisher).detach()
         return mask.view(1, -1)
-
-
-def forward_features(self, x, use_noise=True):
-    for i in range(self.layer_num):
-        if use_noise:
-            x = self.noise_maker[i](self.blocks[i](x))
-        else:
-            x = self.blocks[i](x)
-    return x
 
 class Attention(nn.Module):
     fused_attn: Final[bool]

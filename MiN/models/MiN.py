@@ -244,29 +244,16 @@ class MinNet(object):
             prog_bar.set_description(info)
 
     def compute_fisher_safe(self, dataloader):
-        """
-        Compute Fisher safely:
-        - Freeze all params
-        - Enable grad only for noise + classifier
-        """
 
-        # 1. Freeze everything
+
         for p in self._network.parameters():
             p.requires_grad = False
 
-        # 2. Enable noise
-        if hasattr(self._network.backbone, "noise_maker"):
-            for p in self._network.backbone.noise_maker.parameters():
-                p.requires_grad = True
-
-        # 3. Enable classifier
         for p in self._network.normal_fc.parameters():
             p.requires_grad = True
 
-        # 4. Compute fisher (your corrected version)
         fisher = compute_fisher(self._network, dataloader)
 
-        # 5. Freeze again
         for p in self._network.parameters():
             p.requires_grad = False
 
@@ -353,15 +340,16 @@ class MinNet(object):
                         fisher_flat = fisher_vec.view(-1)
 
                         for noise_layer in noise_maker:
+                            fisher_vec = noise_layer.fisher_importance
+                            if fisher_vec is None:
+                                continue
+
+                            fisher_flat = fisher_vec.view(-1)
+
                             for mu_layer in noise_layer.mu:
-
-                                noise_weight = mu_layer.weight.view(-1)
-
-                                min_len = min(noise_weight.numel(), fisher_flat.numel())
-
-                                fisher_loss += (
-                                    noise_weight[:min_len].pow(2) * fisher_flat[:min_len]
-                                ).mean()
+                                w = mu_layer.weight.view(-1)
+                                min_len = min(w.numel(), fisher_flat.numel())
+                                fisher_loss += (w[:min_len].pow(2) * fisher_flat[:min_len]).mean()
 
                         loss = loss + 0.1 * fisher_loss
 
@@ -435,7 +423,7 @@ class MinNet(object):
             count += 1
 
             del feature
-            torch.cuda.empty_cache()
+
 
         prototype = proto_sum / count
         return prototype
