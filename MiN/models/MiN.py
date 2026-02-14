@@ -209,6 +209,12 @@ class MinNet(object):
         del test_set
 
     def fit_fc(self, train_loader, test_loader):
+        print("=== BEFORE FIT_FC ===")
+        print("Backbone training mode:", self._network.backbone.training)
+
+        total_grad = sum(p.requires_grad for p in self._network.backbone.parameters())
+        print("Backbone params requiring grad:", total_grad)
+
         self._network.eval()
         self._network.to(self.device)
         self._network.backbone.eval()
@@ -226,6 +232,8 @@ class MinNet(object):
             )
             self.logger.info(info)
             prog_bar.set_description(info)
+            print("Memory allocated:",
+                torch.cuda.memory_allocated() / 1024**3, "GB")
 
     def re_fit(self, train_loader, test_loader):
         self._network.eval()

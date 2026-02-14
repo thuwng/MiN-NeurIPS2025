@@ -129,7 +129,11 @@ class MiNbaseNet(nn.Module):
     @torch.no_grad()
     def fit(self, X: torch.Tensor, Y: torch.Tensor) -> None:
 
-        X = self.buffer(self.backbone(X))
+        with torch.no_grad():
+            X = self.backbone(X)
+            X = self.buffer(X)
+
+        X = X.detach()
 
         X, Y = X.to(self.weight), Y.to(self.weight)
 
