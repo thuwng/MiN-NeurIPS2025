@@ -118,16 +118,15 @@ def compute_fisher(model, dataloader):
 
         # ---- Backbone only ----
         features = model.backbone(images)
-        features = model.buffer(features)
         features = features.detach().requires_grad_(True)
         if features.grad is not None:
             features.grad.zero_()
 
         # ---- Classifier ONLY (NO PiNoise) ----
-        logits = model.normal_fc(features)["logits"]
+        logits = model.forward_fc(features)["logits"]
         loss = F.cross_entropy(logits, labels)
 
-        model.normal_fc.zero_grad(set_to_none=True)
+        model.zero_grad(set_to_none=True)
         loss.backward()
 
         fisher = features.grad.detach().pow(2).mean(dim=0)
