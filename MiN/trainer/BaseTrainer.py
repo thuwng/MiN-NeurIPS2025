@@ -116,11 +116,22 @@ def compute_fisher(model, dataloader):
         images = images.to(device, non_blocking=True)
         labels = labels.to(device, non_blocking=True)
 
-        # ---- Backbone only ----
-        features = model.backbone(images)
-        features = features.detach().requires_grad_(True)
+        # ---- Backbone ----
+        backbone_feat = model.backbone(images)
+
+        # ---- Buffer ----
+        buffer_feat = model.buffer(backbone_feat)
+
+        print(
+            "FISHER DEBUG | backbone:", backbone_feat.shape,
+            "buffer:", buffer_feat.shape,
+            "fc_in:", model.normal_fc.weight.shape[1]
+        )
+
+        features = buffer_feat.detach().requires_grad_(True)
         if features.grad is not None:
             features.grad.zero_()
+
         print("Features shape:", features.shape)
 
         # ---- Classifier ONLY (NO PiNoise) ----
