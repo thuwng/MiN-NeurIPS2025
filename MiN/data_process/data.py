@@ -152,11 +152,11 @@ class iCUB200(iData):
         self.class_order = np.arange(200).tolist()
 
     def data_initialization(self):
-        train_dir = r'[DATA PATH]'
-        test_dir = r'[DATA PATH]'
+        train_dir = os.path.join(self.args['data_root'], 'train')
+        test_dir = os.path.join(self.args['data_root'], 'test')
+
         self.category_index, self.train_data = split_img_label(train_dir)
         self.category_index, self.test_data = split_img_label(test_dir)
-
 
 class iOmnibenchmark(iData):
     def __init__(self, args):
