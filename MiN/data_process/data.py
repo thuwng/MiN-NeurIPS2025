@@ -152,11 +152,48 @@ class iCUB200(iData):
         self.class_order = np.arange(200).tolist()
 
     def data_initialization(self):
-        train_dir = r'[DATA PATH]'
-        test_dir = r'[DATA PATH]'
-        self.category_index, self.train_data = split_img_label(train_dir)
-        self.category_index, self.test_data = split_img_label(test_dir)
+        root = self.args['data_root']
 
+        images_txt = os.path.join(root, 'images.txt')
+        labels_txt = os.path.join(root, 'image_class_labels.txt')
+        split_txt = os.path.join(root, 'train_test_split.txt')
+        images_root = os.path.join(root, 'images')
+
+        with open(images_txt) as f:
+            image_lines = f.readlines()
+
+        with open(labels_txt) as f:
+            label_lines = f.readlines()
+
+        with open(split_txt) as f:
+            split_lines = f.readlines()
+
+        train_data = []
+        test_data = []
+
+        for img_line, label_line, split_line in zip(image_lines, label_lines, split_lines):
+            img_id, img_path = img_line.strip().split()
+            _, label = label_line.strip().split()
+            _, is_train = split_line.strip().split()
+
+            full_path = os.path.join(images_root, img_path)
+            label = int(label) - 1
+
+            if is_train == '1':
+                train_data.append((full_path, label))
+            else:
+                test_data.append((full_path, label))
+
+        self.train_data = [[] for _ in range(200)]
+        self.test_data = [[] for _ in range(200)]
+
+        for path, label in train_data:
+            self.train_data[label].append((path, label))
+
+        for path, label in test_data:
+            self.test_data[label].append((path, label))
+
+        self.category_index = [str(i) for i in range(200)]
 
 class iOmnibenchmark(iData):
     def __init__(self, args):
